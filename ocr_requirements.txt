@@ -1,0 +1,78 @@
+# AI SkillFit: OCR & Integrity Requirements
+
+This document outlines the technical and functional requirements for the OCR (Identity Verification) and Proctoring (Anti-Cheat) modules of the AI SkillFit platform.
+
+---
+
+## 1. OCR & Identity Verification Requirements
+
+The system must verify the candidate's identity before starting the interview.
+
+### Functional Requirements:
+- **Aadhaar Card OCR**: Extract Name, Date of Birth, and Gender from the front of the Aadhaar card.
+- **Voter ID/Driving License**: Support fallback for other government-issued IDs.
+- **Data Validation**: Cross-reference the extracted OCR data with the profile data provided during onboarding.
+- **Blur Detection**: Reject images with low sharpness to ensure high-accuracy OCR results.
+- **Glare Detection**: Detect and prompt the user to retake photos if lighting makes the card unreadable.
+
+### Technical Dependencies:
+- **Frontend**: `tesseract.js` for on-device OCR (speed) or Google Cloud Vision API (accuracy).
+- **Backend**: `pytesseract` or `easyocr` for server-side processing of high-res uploads.
+- **Preprocessing**: `canvas` (web) or `opencv-python` (backend) for grayscale conversion and thresholding.
+
+---
+
+## 2. Face Verification Requirements
+
+Continuous matching of the live candidate against a reference photo.
+
+### Functional Requirements:
+- **Reference Capture**: Capture a high-quality "Anchor Selfie" at the start of the session.
+- **Match Confidence**: Maintain a confidence score > 75% for "Clear" status.
+- **Face Count**: Detect and flag if multiple faces appear in the frame.
+- **Liveness Detection**: Detect simple spoofing (e.g., holding a photo to the camera) using head-pose variation.
+
+### Technical Dependencies:
+- `face-api.js`: Used for face detection, landmarking, and descriptor matching on the web.
+- `expo-face-detector`: Native face tracking for mobile clients.
+- `tensorflow.js`: Backend for advanced liveness models.
+
+---
+
+## 3. Proctoring & Anti-Cheat (The "Other Stuff")
+
+Monitoring candidate behavior during the voice interview with Priya.
+
+### Monitoring Points:
+- **Visibility Concerns**: Flag if the face is not visible for more than 5 seconds.
+- **Head Turns**: Detect significant head rotation (looking away from the screen for answers).
+- **App Switching**: (Web) Detect when the user switches tabs or minimizes the browser.
+- **Browser Integrity**: Detect if Developer Tools are opened during the assessment.
+
+### Severity Levels:
+- **Warning**: Minor violation (e.g., face obscured briefly). Triggers a subtle UI alert.
+- **Critical**: Major violation (e.g., left the app). Triggers an immediate session block.
+- **Automatic Block**: Session terminates after 3 warnings or 1 critical violation.
+
+---
+
+## 4. Audio Integrity Requirements
+
+Ensuring the voice interview is conducted by the candidate alone.
+
+### Requirements:
+- **Silence Detection**: Flag if the candidate is silent for more than 15 seconds during a question.
+- **Background Noise**: Filter out common environmental noise while keeping the candidate's voice clear.
+- **Speaker Diarization**: Detect if a second person is speaking or prompting the candidate.
+
+---
+
+## 5. Technical Stack Summary
+
+| Requirement | Technology |
+|---|---|
+| **OCR (Web)** | `tesseract.js` |
+| **Face Matching** | `face-api.js` |
+| **Proctoring Logic** | Custom `VideoTracker` class (frontend/src/ai_modules/video_ai) |
+| **Audio Processing** | Sarvam AI (STT) + LiveKit Audio Tracks |
+| **Integrity Logging** | Supabase `interviews` table (metadata field) |
