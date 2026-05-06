@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform, ScrollView, Dimensions, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform, ScrollView, Dimensions, Image, AppState, AppStateStatus } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -25,6 +25,8 @@ import { runOnJS } from 'react-native-reanimated';
 import { theme } from "../../theme";
 import { AppButton } from "../../components/AppButton";
 import { startInterview, getResults, InterviewResult } from "../../services/interviewService";
+import { VideoTracker } from "../../ai_modules/video_ai";
+import { assessLiveVideo, ReferenceProfile } from "../../ai_modules/video_ai/webIdentity";
 
 const { width } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
@@ -100,13 +102,23 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   const [showRefPhoto, setShowRefPhoto] = useState(false);
   const [facesCount, setFacesCount] = useState(0);
 
+  const trackerRef = useRef<VideoTracker>(new VideoTracker());
+  const assessmentIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const roomRef = useRef<Room | null>(null);
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const transcriptScrollRef = useRef<ScrollView | null>(null);
   const remoteAudioTracksRef = useRef<RemoteAudioTrack[]>([]);
 
   useEffect(() => {
-    return () => { disconnectCleanly(); };
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      trackerRef.current.recordAppStateChange(nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+      disconnectCleanly();
+    };
   }, []);
 
   const attachRemoteAudioTrack = useCallback((track: RemoteAudioTrack) => {
@@ -137,6 +149,12 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
     try {
       if (localAudioRef.current) { localAudioRef.current.stop(); localAudioRef.current = null; }
       if (roomRef.current) { await roomRef.current.disconnect(); roomRef.current = null; }
+      
+      trackerRef.current.stopTracking();
+      if (assessmentIntervalRef.current) {
+        clearInterval(assessmentIntervalRef.current);
+        assessmentIntervalRef.current = null;
+      }
     } catch {}
   }, [detachAllRemoteAudio]);
 
@@ -253,6 +271,23 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
       await room.localParticipant.publishTrack(audioTrack);
       setMicActive(true);
 
+      // Start Proctoring
+      await trackerRef.current.startTracking();
+      if (isWeb && referencePhoto) {
+        assessmentIntervalRef.current = setInterval(async () => {
+          const assessment = await assessLiveVideo(referencePhoto as any as ReferenceProfile);
+          if (assessment) {
+            trackerRef.current.setLiveSignals({
+              faceMatchConfidence: assessment.matchConfidence,
+              liveQualityScore: assessment.qualityScore,
+            });
+            if (assessment.faceCount === 0) onFacesDetected(0, 0);
+            else if (assessment.faceCount > 1) onFacesDetected(2, 0);
+            else onFacesDetected(1, 0);
+          }
+        }, 3000);
+      }
+
     } catch (err: any) {
       await disconnectCleanly();
       setErrorMessage(err.message ?? "Failed to connect to the interview room. Please try again.");
@@ -296,14 +331,25 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
 
     if (faceCount === 0) {
       setVerificationStatus('no_face');
+      trackerRef.current.recordVisibilityConcern('No face detected in camera feed');
     } else if (faceCount > 1) {
       setVerificationStatus('multiple_faces');
+      trackerRef.current.recordVisibilityConcern('Multiple faces detected in camera feed');
     } else {
       if (Math.abs(yaw) > 20) {
         setVerificationStatus('not_looking');
+        trackerRef.current.recordVisibilityConcern('Candidate is not looking at the camera');
       } else {
         setVerificationStatus('verified');
       }
+    }
+
+    // Auto-cancel if too many flags
+    const summary = trackerRef.current.getSummary();
+    if (summary.cancelled) {
+      disconnectCleanly();
+      setErrorMessage(summary.cancelReason || "Interview cancelled due to proctoring violations.");
+      setInterviewState("error");
     }
   };
 
@@ -549,7 +595,6 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-<<<<<<< HEAD
   container: { flex: 1, backgroundColor: theme.colors.background },
   backBtn: { position: "absolute", top: 56, left: 16, zIndex: 10, padding: 8, backgroundColor: "#fff", borderRadius: theme.borderRadius.full, elevation: 2 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.xxl },

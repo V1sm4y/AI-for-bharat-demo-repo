@@ -11,6 +11,8 @@ import {
   Trash2,
   Users,
   XCircle,
+  ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supabase } from './lib/supabase';
@@ -199,6 +201,7 @@ export default function App() {
           <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
           <NavItem icon={<Briefcase size={20} />} label="Job Management" active={activeTab === 'jobs'} onClick={() => setActiveTab('jobs')} />
           <NavItem icon={<Users size={20} />} label="Candidates" active={activeTab === 'candidates'} onClick={() => setActiveTab('candidates')} />
+          <NavItem icon={<ShieldCheck size={20} />} label="Face Verify" active={activeTab === 'faceVerify'} onClick={() => setActiveTab('faceVerify')} />
         </nav>
 
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
@@ -211,6 +214,7 @@ export default function App() {
         {activeTab === 'dashboard' && <DashboardView jobs={jobs} candidates={candidates} />}
         {activeTab === 'jobs' && <JobsView jobs={jobs} userId={sessionUser.id} onRefresh={() => fetchData()} setMessage={setMessage} />}
         {activeTab === 'candidates' && <CandidatesView candidates={candidates} onRefresh={() => fetchData()} setMessage={setMessage} />}
+        {activeTab === 'faceVerify' && <FaceVerifyView />}
       </main>
     </div>
   );
@@ -554,6 +558,31 @@ function CandidatesView({ candidates, onRefresh, setMessage }: any) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function FaceVerifyView() {
+  return (
+    <div className="face-verify-view">
+      <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2>Face Verification</h2>
+          <p>Compare a reference photo with a live camera feed before interviews or candidate checks.</p>
+        </div>
+        <a className="btn btn-primary" href="/face-verify/" target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
+          <ExternalLink size={18} /> Open Full Screen
+        </a>
+      </header>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden', height: 'calc(100vh - 250px)', border: '1px solid var(--border)' }}>
+        <iframe
+          title="Face verification"
+          src="/face-verify/"
+          style={{ width: '100%', height: '100%', border: 'none' }}
+          allow="camera; microphone"
+        />
       </div>
     </div>
   );
