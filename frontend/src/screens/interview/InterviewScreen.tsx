@@ -20,7 +20,8 @@ import {
   useFrameProcessor,
   runAtTargetFps
 } from 'react-native-vision-camera';
-import { useFaceDetector, FaceDetectorConfig } from 'react-native-vision-camera-face-detector';
+import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+
 import { runOnJS } from 'react-native-reanimated';
 import { theme } from "../../theme";
 import { AppButton } from "../../components/AppButton";
@@ -87,7 +88,7 @@ const WaveBar = ({ active, delay }: { active: boolean; delay: number }) => {
 };
 
 export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
-  const { jobId, referencePhoto, candidateName = "Candidate", trade = "General", phoneNumber = "" } = route.params || {};
+  const { jobId, referencePhoto, referenceProfile, candidateName = "Candidate", trade = "General", phoneNumber = "" } = route.params || {};
 
   const [interviewState, setInterviewState] = useState<InterviewState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -273,9 +274,9 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
 
       // Start Proctoring
       await trackerRef.current.startTracking();
-      if (isWeb && referencePhoto) {
+      if (isWeb && referenceProfile) {
         assessmentIntervalRef.current = setInterval(async () => {
-          const assessment = await assessLiveVideo(referencePhoto as any as ReferenceProfile);
+          const assessment = await assessLiveVideo(referenceProfile as ReferenceProfile);
           if (assessment) {
             trackerRef.current.setLiveSignals({
               faceMatchConfidence: assessment.matchConfidence,
@@ -317,7 +318,7 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   const device = isWeb ? null : useCameraDevice('front');
 
   // Configure Face Detector
-  const faceDetectorConfig = useRef<FaceDetectorConfig>({
+  const faceDetectorConfig = useRef<any>({
     performanceMode: 'fast',
     landmarkMode: 'none',
     classificationMode: 'none',
@@ -366,36 +367,22 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   }, [detectFaces]);
 
   useEffect(() => {
-    if (!isWeb && !permission.hasPermission) {
-      permission.requestPermission();
+    if (!isWeb && 'hasPermission' in permission && !permission.hasPermission) {
+      (permission as any).requestPermission?.();
     }
 
-    // Web simulation
-    if (isWeb) {
+    // Web simulation: only run mock detection when there's no referenceProfile
+    // (otherwise assessLiveVideo already provides real face detection on web)
+    if (isWeb && !referenceProfile) {
       const interval = setInterval(() => {
         const mockFaceCount = Math.random() > 0.1 ? 1 : 0;
         onFacesDetected(mockFaceCount, 0);
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [permission?.hasPermission]);
+  }, [permission?.hasPermission, referenceProfile]);
 
-  const config = STATUS_CONFIG[verificationStatus];
 
-  if (!isWeb && !permission.hasPermission) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={64} color={theme.colors.primary} />
-          <Text style={styles.permissionTitle}>Camera Access Required</Text>
-          <Text style={styles.permissionText}>
-            AI Interview Proctoring requires camera access for real-time monitoring.
-          </Text>
-          <AppButton title="Grant Permission" onPress={permission.requestPermission} />
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   if (!isWeb && !permission.hasPermission) {
     return (
@@ -406,11 +393,16 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
           <Text style={styles.permissionText}>
             AI Interview Proctoring requires camera access for real-time monitoring.
           </Text>
-          <AppButton title="Grant Permission" onPress={permission.requestPermission} />
+          <AppButton 
+            title="Grant Permission" 
+            onPress={() => (permission as any).requestPermission?.()} 
+          />
         </View>
       </SafeAreaView>
     );
   }
+
+
 
   const config = STATUS_CONFIG[verificationStatus];
 

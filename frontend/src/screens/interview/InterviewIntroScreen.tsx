@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,11 +7,15 @@ import { theme } from '../../theme';
 import { AppButton } from '../../components/AppButton';
 import { AppCard } from '../../components/AppCard';
 import { AuthContext } from '../../context/AuthContext';
+import { analyzeReferenceFromUri, ReferenceProfile } from '../../ai_modules/video_ai/webIdentity';
 
 export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
   const { jobId } = route.params || {};
   const { profile } = useContext(AuthContext);
   const [referencePhoto, setReferencePhoto] = useState<string | null>(null);
+  const [referenceProfile, setReferenceProfile] = useState<ReferenceProfile | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const instructions = [
     {
@@ -40,6 +44,27 @@ export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
     },
   ];
 
+  const analyzePhoto = async (uri: string) => {
+    setReferencePhoto(uri);
+    setReferenceProfile(null);
+    setAnalysisError(null);
+
+    // On web, run face-api.js analysis to create a ReferenceProfile
+    if (Platform.OS === 'web') {
+      setAnalyzing(true);
+      try {
+        const profile = await analyzeReferenceFromUri(uri);
+        setReferenceProfile(profile);
+      } catch (err: any) {
+        setAnalysisError(err.message || 'Face analysis failed');
+        setReferencePhoto(null);
+        Alert.alert('Face Analysis Failed', err.message || 'Could not analyze the photo. Please try a different one.');
+      } finally {
+        setAnalyzing(false);
+      }
+    }
+  };
+
   const pickImage = async () => {
     try {
       // Ask for permission
@@ -57,7 +82,7 @@ export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
       });
 
       if (!result.canceled && result.assets[0]) {
-        setReferencePhoto(result.assets[0].uri);
+        await analyzePhoto(result.assets[0].uri);
       }
     } catch (err) {
       console.error('Image pick error:', err);
@@ -81,7 +106,7 @@ export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
       });
 
       if (!result.canceled && result.assets[0]) {
-        setReferencePhoto(result.assets[0].uri);
+        await analyzePhoto(result.assets[0].uri);
       }
     } catch (err) {
       console.error('Camera error:', err);
@@ -119,11 +144,23 @@ export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
             {referencePhoto ? (
               <View style={styles.photoPreviewContainer}>
                 <Image source={{ uri: referencePhoto }} style={styles.photoPreview} />
-                <View style={styles.photoVerified}>
-                  <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
-                  <Text style={styles.photoVerifiedText}>Photo uploaded</Text>
-                </View>
-                <TouchableOpacity onPress={() => setReferencePhoto(null)} style={styles.changePhotoBtn}>
+                {analyzing ? (
+                  <View style={styles.photoVerified}>
+                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                    <Text style={[styles.photoVerifiedText, { color: theme.colors.primary }]}>Analyzing face...</Text>
+                  </View>
+                ) : referenceProfile ? (
+                  <View style={styles.photoVerified}>
+                    <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
+                    <Text style={styles.photoVerifiedText}>Face verified ✓</Text>
+                  </View>
+                ) : Platform.OS !== 'web' ? (
+                  <View style={styles.photoVerified}>
+                    <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
+                    <Text style={styles.photoVerifiedText}>Photo uploaded</Text>
+                  </View>
+                ) : null}
+                <TouchableOpacity onPress={() => { setReferencePhoto(null); setReferenceProfile(null); setAnalysisError(null); }} style={styles.changePhotoBtn}>
                   <Text style={styles.changePhotoText}>Change Photo</Text>
                 </TouchableOpacity>
               </View>
@@ -177,23 +214,28 @@ export const InterviewIntroScreen: React.FC<any> = ({ navigation, route }) => {
 
       <View style={styles.footer}>
         <AppButton
-          title={referencePhoto ? "Begin Interview" : "Upload Photo First"}
+          title={analyzing ? "Analyzing Face..." : referencePhoto ? "Begin Interview" : "Upload Photo First"}
           onPress={() => {
             if (!referencePhoto) {
               Alert.alert('Photo Required', 'Please upload or take a reference photo before starting the interview.');
               return;
             }
+            if (Platform.OS === 'web' && !referenceProfile) {
+              Alert.alert('Analysis Required', 'Please wait for face analysis to complete, or try uploading a different photo.');
+              return;
+            }
             navigation.navigate('Interview', { 
               jobId, 
               referencePhoto,
+              referenceProfile: referenceProfile || undefined,
               candidateName: profile?.full_name ?? 'Candidate',
               trade: profile?.trade ?? 'General',
               phoneNumber: profile?.phone ?? '',
             });
           }}
           style={styles.beginBtn}
-          disabled={!referencePhoto}
-          icon={referencePhoto ? <Ionicons name="arrow-forward" size={20} color="#fff" /> : undefined}
+          disabled={!referencePhoto || analyzing}
+          icon={referencePhoto && !analyzing ? <Ionicons name="arrow-forward" size={20} color="#fff" /> : undefined}
         />
       </View>
     </SafeAreaView>

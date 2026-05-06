@@ -275,6 +275,75 @@ export async function pickAndAnalyzeReferencePhoto() {
   };
 }
 
+/**
+ * Analyze a reference photo from a URI (blob URL, data URL, or file URI).
+ * Use this when the image was already picked via expo-image-picker or similar.
+ * Returns a ReferenceProfile ready for use with assessLiveVideo().
+ */
+export async function analyzeReferenceFromUri(imageUri: string): Promise<ReferenceProfile> {
+  if (!isWeb()) {
+    throw new Error('Face analysis is only available on web');
+  }
+
+  const faceapi = await getFaceApi();
+  if (!faceapi) {
+    throw new Error('Face analysis is not available in this environment');
+  }
+
+  // Convert blob URL to data URL if needed, or use directly
+  let dataUrl = imageUri;
+  if (imageUri.startsWith('blob:')) {
+    const response = await fetch(imageUri);
+    const blob = await response.blob();
+    dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('Could not read blob'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const image = await loadImage(dataUrl);
+  const fullImageData = getImageDataFromFace(image, { x: 0, y: 0, width: image.width, height: image.height });
+  const imageHash = computeHash(fullImageData.data);
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+  const detections = await faceapi.detectAllFaces(image, options).withFaceLandmarks().withFaceDescriptors();
+
+  if (detections.length !== 1) {
+    throw new Error(
+      detections.length === 0
+        ? 'No face found in the reference photo. Please use a clear selfie.'
+        : 'Multiple faces found. Please use a photo with only one face.'
+    );
+  }
+
+  const face = detections[0];
+  const box = face.detection.box;
+  const faceImageData = getImageDataFromFace(image, { x: box.x, y: box.y, width: box.width, height: box.height });
+  const brightness = computeBrightness(faceImageData);
+  const contrast = computeContrast(faceImageData);
+  const sharpness = computeSharpness(faceImageData);
+  const faceCoverage = (box.width * box.height) / Math.max(image.width * image.height, 1);
+  const qualityScore = computeQuality(brightness, contrast, sharpness, faceCoverage);
+  const faceHash = Array.from(face.descriptor as ArrayLike<number>).map((v) => Number(v).toFixed(4)).join('|');
+  const geometrySignature = computeGeometrySignature(face);
+  const warnings = createWarnings(brightness, contrast, sharpness, faceCoverage);
+
+  return {
+    imageDataUrl: dataUrl,
+    imageHash,
+    faceHash,
+    qualityScore,
+    brightness,
+    contrast,
+    sharpness,
+    faceCount: 1,
+    faceCoverage,
+    geometrySignature,
+    warnings,
+  };
+}
+
 export async function loadAttemptInsights(userId: string, jobId?: string, referenceHash?: string): Promise<AttemptInsights> {
   const { data: interviews } = await supabase
     .from('interviews')

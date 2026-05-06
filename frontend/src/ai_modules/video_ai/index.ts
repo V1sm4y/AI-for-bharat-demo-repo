@@ -1,4 +1,4 @@
-import { Camera } from 'expo-camera';
+import { Platform } from 'react-native';
 
 /**
  * Video AI Module
@@ -67,9 +67,24 @@ export class VideoTracker {
   private duplicateAttempts = 0;
   private duplicateReferenceUsers: string[] = [];
   private referenceHash: string | null = null;
+  private lastVisibilityFlagTime = 0;
+  private static readonly VISIBILITY_COOLDOWN_MS = 10_000; // 10 seconds between visibility flags
 
   async requestPermissions(): Promise<boolean> {
-    const { status } = await Camera.requestCameraPermissionsAsync();
+    // Dynamically import expo-camera only on native platforms
+    let status = 'denied';
+    try {
+      if (Platform.OS !== 'web') {
+        const { Camera } = await import('expo-camera');
+        const result = await Camera.requestCameraPermissionsAsync();
+        status = result.status;
+      } else {
+        // On web, camera permissions are handled by the browser at getUserMedia time
+        status = 'granted';
+      }
+    } catch (err) {
+      console.warn('Failed to request camera permissions:', err);
+    }
     console.log('Camera permission status:', status);
     const granted = status === 'granted';
 
@@ -175,11 +190,20 @@ export class VideoTracker {
       message,
       metadata,
     });
-    this.addFlag(`visibility_${this.flags.length + 1}`, message, 'warning');
+
+    // Cooldown: don't add a new flag if the last one was added less than 10 seconds ago
+    const now = Date.now();
+    if (now - this.lastVisibilityFlagTime < VideoTracker.VISIBILITY_COOLDOWN_MS) {
+      return;
+    }
+    this.lastVisibilityFlagTime = now;
+    this.addFlag(`visibility_flag_${this.flags.filter(f => f.code.startsWith('visibility_flag_')).length + 1}`, message, 'warning');
   }
 
   addFlag(code: string, message: string, severity: ProctoringEventSeverity): void {
+    // Prevent duplicate flags with the same code
     if (this.flags.some((flag) => flag.code === code)) return;
+    if (this.cancelled) return;
 
     this.flags.push({
       code,
