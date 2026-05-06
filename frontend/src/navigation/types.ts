@@ -24,6 +24,8 @@ export type MainStackParamList = {
     candidateName: string;
     trade: string;
     phoneNumber: string;
+    referencePhoto?: string;
+    referenceProfile?: any; // ReferenceProfile from webIdentity (web only)
   };
   Processing: { jobId: string };
   Result: { jobId?: string; resultData: any };

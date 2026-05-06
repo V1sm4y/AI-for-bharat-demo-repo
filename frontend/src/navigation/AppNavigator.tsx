@@ -2,9 +2,10 @@ import React, { useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, View, Platform } from 'react-native';
+import { ActivityIndicator, View, Platform, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { ENV } from '../config/env';
 
 import { AuthContext } from '../context/AuthContext';
 import { RootStackParamList, AuthStackParamList, MainStackParamList, HomeTabParamList } from './types';
@@ -118,6 +119,23 @@ export const AppNavigator = () => {
       </NavigationContainer>
     );
   }
+
+  // Check if Supabase is likely misconfigured
+  const isSupabaseMisconfigured = !user && ENV.SUPABASE_URL.includes('your-project-ref');
+
+  if (isSupabaseMisconfigured) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#fff' }}>
+        <Ionicons name="warning" size={64} color="#f59e0b" />
+        <Text style={{ fontSize: 20, fontWeight: 'bold', marginTop: 16, textAlign: 'center' }}>Configuration Required</Text>
+        <Text style={{ marginTop: 8, textAlign: 'center', color: '#64748b' }}>
+          It looks like your Supabase URL is still set to the placeholder.
+          Please update your .env file with your actual Supabase credentials.
+        </Text>
+      </View>
+    );
+  }
+
 
   if (!user) {
     return (

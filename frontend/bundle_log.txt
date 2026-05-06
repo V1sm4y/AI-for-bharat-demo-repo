@@ -1,0 +1,18 @@
+﻿env: load .env
+env: export EXPO_PUBLIC_BACKEND_URL EXPO_PUBLIC_BACKEND_API_KEY EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+Starting project at C:\Users\visma\OneDrive\Desktop\New folder\AI-for-bharat-demo-repo\frontend
+Metro is running in CI mode, reloads are disabled. Remove CI=true to enable watch mode.
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web .\index.ts ΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæΓûæ  0.0% (0/1)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.7% (700/701)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (702/710)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (703/710)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (751/831)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (819/863)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (886/937)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (974/975)
+Web .\index.ts ΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûôΓûæ 99.9% (975/975)
+Web Bundled 31096ms index.ts (975 modules)
+ LOG  [web] Logs will appear in the browser console

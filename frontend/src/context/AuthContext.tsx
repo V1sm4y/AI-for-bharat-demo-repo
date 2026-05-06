@@ -149,23 +149,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let mounted = true;
 
     const init = async () => {
-      // 1. Load language first
-      const storedLang = await AsyncStorage.getItem('language_preference');
-      if (mounted && storedLang) _setLanguage(storedLang);
+      try {
+        // 1. Load language first
+        const storedLang = await AsyncStorage.getItem('language_preference');
+        if (mounted && storedLang) _setLanguage(storedLang);
 
-      // 2. Check session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!mounted) return;
+        // 2. Check session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
 
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      if (currentUser) {
-        await fetchProfile(currentUser.id);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        
+        if (currentUser) {
+          await fetchProfile(currentUser.id);
+        }
+      } catch (err) {
+        console.error('Auth initialization failed:', err);
+      } finally {
+        if (mounted) setIsLoading(false);
       }
-      
-      if (mounted) setIsLoading(false);
     };
+
 
     init();
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform, ScrollView, Dimensions, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform, ScrollView, Dimensions, Image, AppState, AppStateStatus } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -20,11 +20,14 @@ import {
   useFrameProcessor,
   runAtTargetFps
 } from 'react-native-vision-camera';
-import { useFaceDetector, FaceDetectorConfig } from 'react-native-vision-camera-face-detector';
+import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+
 import { runOnJS } from 'react-native-reanimated';
 import { theme } from "../../theme";
 import { AppButton } from "../../components/AppButton";
 import { startInterview, getResults, InterviewResult } from "../../services/interviewService";
+import { VideoTracker } from "../../ai_modules/video_ai";
+import { assessLiveVideo, ReferenceProfile } from "../../ai_modules/video_ai/webIdentity";
 
 const { width } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
@@ -85,7 +88,7 @@ const WaveBar = ({ active, delay }: { active: boolean; delay: number }) => {
 };
 
 export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
-  const { jobId, referencePhoto, candidateName = "Candidate", trade = "General", phoneNumber = "" } = route.params || {};
+  const { jobId, referencePhoto, referenceProfile, candidateName = "Candidate", trade = "General", phoneNumber = "" } = route.params || {};
 
   const [interviewState, setInterviewState] = useState<InterviewState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -99,14 +102,83 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('scanning');
   const [showRefPhoto, setShowRefPhoto] = useState(false);
   const [facesCount, setFacesCount] = useState(0);
+  const [webCameraReady, setWebCameraReady] = useState(false);
+
+  const trackerRef = useRef<VideoTracker>(new VideoTracker());
+  const assessmentIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const webVideoRef = useRef<HTMLVideoElement | null>(null);
+  const webStreamRef = useRef<MediaStream | null>(null);
 
   const roomRef = useRef<Room | null>(null);
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const transcriptScrollRef = useRef<ScrollView | null>(null);
   const remoteAudioTracksRef = useRef<RemoteAudioTrack[]>([]);
 
+  // Start webcam on web when interview becomes active
   useEffect(() => {
-    return () => { disconnectCleanly(); };
+    if (!isWeb || interviewState !== 'active') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        webStreamRef.current = stream;
+        // Create a hidden video element for face-api.js to query
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.style.position = 'absolute';
+        video.style.top = '0';
+        video.style.left = '0';
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'cover';
+        video.style.borderRadius = '12px';
+        video.id = 'proctoring-video';
+        webVideoRef.current = video;
+
+        // Find the camera container and insert
+        const container = document.getElementById('web-camera-container');
+        if (container) {
+          container.innerHTML = '';
+          container.appendChild(video);
+        }
+        await video.play();
+        setWebCameraReady(true);
+        trackerRef.current.markCameraReady();
+      } catch (err) {
+        console.warn('[Web Camera] Failed to start:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (webStreamRef.current) {
+        webStreamRef.current.getTracks().forEach(t => t.stop());
+        webStreamRef.current = null;
+      }
+      if (webVideoRef.current) {
+        webVideoRef.current.remove();
+        webVideoRef.current = null;
+      }
+      setWebCameraReady(false);
+    };
+  }, [interviewState]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      trackerRef.current.recordAppStateChange(nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+      disconnectCleanly();
+    };
   }, []);
 
   const attachRemoteAudioTrack = useCallback((track: RemoteAudioTrack) => {
@@ -137,6 +209,22 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
     try {
       if (localAudioRef.current) { localAudioRef.current.stop(); localAudioRef.current = null; }
       if (roomRef.current) { await roomRef.current.disconnect(); roomRef.current = null; }
+      
+      // Stop web camera stream
+      if (webStreamRef.current) {
+        webStreamRef.current.getTracks().forEach(t => t.stop());
+        webStreamRef.current = null;
+      }
+      if (webVideoRef.current) {
+        webVideoRef.current.remove();
+        webVideoRef.current = null;
+      }
+
+      trackerRef.current.stopTracking();
+      if (assessmentIntervalRef.current) {
+        clearInterval(assessmentIntervalRef.current);
+        assessmentIntervalRef.current = null;
+      }
     } catch {}
   }, [detachAllRemoteAudio]);
 
@@ -253,6 +341,23 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
       await room.localParticipant.publishTrack(audioTrack);
       setMicActive(true);
 
+      // Start Proctoring
+      await trackerRef.current.startTracking();
+      if (isWeb && referenceProfile) {
+        assessmentIntervalRef.current = setInterval(async () => {
+          const assessment = await assessLiveVideo(referenceProfile as ReferenceProfile);
+          if (assessment) {
+            trackerRef.current.setLiveSignals({
+              faceMatchConfidence: assessment.matchConfidence,
+              liveQualityScore: assessment.qualityScore,
+            });
+            if (assessment.faceCount === 0) onFacesDetected(0, 0);
+            else if (assessment.faceCount > 1) onFacesDetected(2, 0);
+            else onFacesDetected(1, 0);
+          }
+        }, 3000);
+      }
+
     } catch (err: any) {
       await disconnectCleanly();
       setErrorMessage(err.message ?? "Failed to connect to the interview room. Please try again.");
@@ -282,7 +387,7 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   const device = isWeb ? null : useCameraDevice('front');
 
   // Configure Face Detector
-  const faceDetectorConfig = useRef<FaceDetectorConfig>({
+  const faceDetectorConfig = useRef<any>({
     performanceMode: 'fast',
     landmarkMode: 'none',
     classificationMode: 'none',
@@ -296,14 +401,25 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
 
     if (faceCount === 0) {
       setVerificationStatus('no_face');
+      trackerRef.current.recordVisibilityConcern('No face detected in camera feed');
     } else if (faceCount > 1) {
       setVerificationStatus('multiple_faces');
+      trackerRef.current.recordVisibilityConcern('Multiple faces detected in camera feed');
     } else {
       if (Math.abs(yaw) > 20) {
         setVerificationStatus('not_looking');
+        trackerRef.current.recordVisibilityConcern('Candidate is not looking at the camera');
       } else {
         setVerificationStatus('verified');
       }
+    }
+
+    // Auto-cancel if too many flags
+    const summary = trackerRef.current.getSummary();
+    if (summary.cancelled) {
+      disconnectCleanly();
+      setErrorMessage(summary.cancelReason || "Interview cancelled due to proctoring violations.");
+      setInterviewState("error");
     }
   };
 
@@ -320,36 +436,22 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   }, [detectFaces]);
 
   useEffect(() => {
-    if (!isWeb && !permission.hasPermission) {
-      permission.requestPermission();
+    if (!isWeb && 'hasPermission' in permission && !permission.hasPermission) {
+      (permission as any).requestPermission?.();
     }
 
-    // Web simulation
-    if (isWeb) {
+    // Web simulation: only run mock detection when there's no referenceProfile
+    // (otherwise assessLiveVideo already provides real face detection on web)
+    if (isWeb && !referenceProfile) {
       const interval = setInterval(() => {
         const mockFaceCount = Math.random() > 0.1 ? 1 : 0;
         onFacesDetected(mockFaceCount, 0);
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [permission?.hasPermission]);
+  }, [permission?.hasPermission, referenceProfile]);
 
-  const config = STATUS_CONFIG[verificationStatus];
 
-  if (!isWeb && !permission.hasPermission) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={64} color={theme.colors.primary} />
-          <Text style={styles.permissionTitle}>Camera Access Required</Text>
-          <Text style={styles.permissionText}>
-            AI Interview Proctoring requires camera access for real-time monitoring.
-          </Text>
-          <AppButton title="Grant Permission" onPress={permission.requestPermission} />
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   if (!isWeb && !permission.hasPermission) {
     return (
@@ -360,11 +462,16 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
           <Text style={styles.permissionText}>
             AI Interview Proctoring requires camera access for real-time monitoring.
           </Text>
-          <AppButton title="Grant Permission" onPress={permission.requestPermission} />
+          <AppButton 
+            title="Grant Permission" 
+            onPress={() => (permission as any).requestPermission?.()} 
+          />
         </View>
       </SafeAreaView>
     );
   }
+
+
 
   const config = STATUS_CONFIG[verificationStatus];
 
@@ -414,9 +521,16 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
           {/* Camera Preview / Proctoring Overlay */}
           <View style={styles.cameraContainer}>
             {isWeb ? (
-              <View style={styles.webCameraPlaceholder}>
-                <Ionicons name="videocam" size={48} color="#475569" />
-                <Text style={styles.webCameraText}>Camera preview only available on Native Mobile</Text>
+              <View 
+                style={styles.webCameraPlaceholder} 
+                nativeID="web-camera-container"
+              >
+                {!webCameraReady && (
+                  <>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.webCameraText}>Starting camera...</Text>
+                  </>
+                )}
               </View>
             ) : device ? (
               <Camera
@@ -549,7 +663,6 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-<<<<<<< HEAD
   container: { flex: 1, backgroundColor: theme.colors.background },
   backBtn: { position: "absolute", top: 56, left: 16, zIndex: 10, padding: 8, backgroundColor: "#fff", borderRadius: theme.borderRadius.full, elevation: 2 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.xxl },
@@ -612,7 +725,7 @@ const styles = StyleSheet.create({
   permissionText: { fontSize: 15, color: theme.colors.textSecondary, textAlign: 'center', lineHeight: 22 },
   cameraContainer: { width: width - 40, height: (width - 40) * 0.75, borderRadius: 12, overflow: 'hidden', marginBottom: 20, elevation: 4, backgroundColor: '#000' },
   camera: { flex: 1 },
-  webCameraPlaceholder: { flex: 1, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  webCameraPlaceholder: { flex: 1, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', padding: 20, position: 'relative' as any, overflow: 'hidden' as any },
   webCameraText: { fontSize: 14, fontWeight: '600', color: '#475569', textAlign: 'center', marginTop: 12 },
   faceBadge: { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 6, zIndex: 10 },
   faceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },

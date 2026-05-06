@@ -90,6 +90,15 @@ async def start_interview(req: StartInterviewRequest):
     logger.info(f"[Server] Starting interview — room={room_name}, candidate={req.candidate_name}, trade={req.trade}")
 
     try:
+        # Check if we have keys. If not, return mock data for local review.
+        if not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET or "your-project" in LIVEKIT_URL:
+            logger.info("[Server] Missing LiveKit keys — returning mock credentials for UI review.")
+            return StartInterviewResponse(
+                token="mock-token-for-review-purposes",
+                room=room_name,
+                url="ws://localhost:8080", # Dummy URL
+            )
+
         # Initialize LiveKit API client
         lkapi = api.LiveKitAPI(
             url=LIVEKIT_URL,
