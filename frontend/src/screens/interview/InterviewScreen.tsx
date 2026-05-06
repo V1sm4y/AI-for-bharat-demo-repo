@@ -102,14 +102,73 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('scanning');
   const [showRefPhoto, setShowRefPhoto] = useState(false);
   const [facesCount, setFacesCount] = useState(0);
+  const [webCameraReady, setWebCameraReady] = useState(false);
 
   const trackerRef = useRef<VideoTracker>(new VideoTracker());
   const assessmentIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const webVideoRef = useRef<HTMLVideoElement | null>(null);
+  const webStreamRef = useRef<MediaStream | null>(null);
 
   const roomRef = useRef<Room | null>(null);
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const transcriptScrollRef = useRef<ScrollView | null>(null);
   const remoteAudioTracksRef = useRef<RemoteAudioTrack[]>([]);
+
+  // Start webcam on web when interview becomes active
+  useEffect(() => {
+    if (!isWeb || interviewState !== 'active') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        webStreamRef.current = stream;
+        // Create a hidden video element for face-api.js to query
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.style.position = 'absolute';
+        video.style.top = '0';
+        video.style.left = '0';
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'cover';
+        video.style.borderRadius = '12px';
+        video.id = 'proctoring-video';
+        webVideoRef.current = video;
+
+        // Find the camera container and insert
+        const container = document.getElementById('web-camera-container');
+        if (container) {
+          container.innerHTML = '';
+          container.appendChild(video);
+        }
+        await video.play();
+        setWebCameraReady(true);
+        trackerRef.current.markCameraReady();
+      } catch (err) {
+        console.warn('[Web Camera] Failed to start:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (webStreamRef.current) {
+        webStreamRef.current.getTracks().forEach(t => t.stop());
+        webStreamRef.current = null;
+      }
+      if (webVideoRef.current) {
+        webVideoRef.current.remove();
+        webVideoRef.current = null;
+      }
+      setWebCameraReady(false);
+    };
+  }, [interviewState]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
@@ -151,6 +210,16 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
       if (localAudioRef.current) { localAudioRef.current.stop(); localAudioRef.current = null; }
       if (roomRef.current) { await roomRef.current.disconnect(); roomRef.current = null; }
       
+      // Stop web camera stream
+      if (webStreamRef.current) {
+        webStreamRef.current.getTracks().forEach(t => t.stop());
+        webStreamRef.current = null;
+      }
+      if (webVideoRef.current) {
+        webVideoRef.current.remove();
+        webVideoRef.current = null;
+      }
+
       trackerRef.current.stopTracking();
       if (assessmentIntervalRef.current) {
         clearInterval(assessmentIntervalRef.current);
@@ -452,9 +521,16 @@ export const InterviewScreen: React.FC<any> = ({ navigation, route }) => {
           {/* Camera Preview / Proctoring Overlay */}
           <View style={styles.cameraContainer}>
             {isWeb ? (
-              <View style={styles.webCameraPlaceholder}>
-                <Ionicons name="videocam" size={48} color="#475569" />
-                <Text style={styles.webCameraText}>Camera preview only available on Native Mobile</Text>
+              <View 
+                style={styles.webCameraPlaceholder} 
+                nativeID="web-camera-container"
+              >
+                {!webCameraReady && (
+                  <>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.webCameraText}>Starting camera...</Text>
+                  </>
+                )}
               </View>
             ) : device ? (
               <Camera
@@ -649,7 +725,7 @@ const styles = StyleSheet.create({
   permissionText: { fontSize: 15, color: theme.colors.textSecondary, textAlign: 'center', lineHeight: 22 },
   cameraContainer: { width: width - 40, height: (width - 40) * 0.75, borderRadius: 12, overflow: 'hidden', marginBottom: 20, elevation: 4, backgroundColor: '#000' },
   camera: { flex: 1 },
-  webCameraPlaceholder: { flex: 1, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  webCameraPlaceholder: { flex: 1, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', padding: 20, position: 'relative' as any, overflow: 'hidden' as any },
   webCameraText: { fontSize: 14, fontWeight: '600', color: '#475569', textAlign: 'center', marginTop: 12 },
   faceBadge: { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 6, zIndex: 10 },
   faceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
